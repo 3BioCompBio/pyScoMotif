@@ -1,0 +1,17 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "pyscomotif"
+authors = [{name = "Gabriel Cia", email = "gabriel-_cia@hotmail.com"}]
+version = "0.9.13"
+dependencies = ["numba", "click", "biopython <=1.79", "networkx", "scipy", "pandas", "numpy", "typing_extensions", "tqdm"]
+requires-python = ">=3.9"
+dynamic = ["description"]
+
+[project.urls]
+Home = "https://github.com/3BioCompBio/pyScoMotif"
+
+[project.scripts]
+pyscomotif = "pyscomotif.pyscomotif:command_line_interface"
