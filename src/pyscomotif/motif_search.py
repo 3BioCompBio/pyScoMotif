@@ -275,6 +275,8 @@ def get_PDBs_that_contain_the_residue_pair(
     res1_resname, res2_resname = pair_of_residues[0], pair_of_residues[1]
     res1_ID: str; res2_ID: str; PDB_ID: str
     for res1_ID, res2_ID, PDB_ID in zip(full_residue_pair_df.residue_1.values, full_residue_pair_df.residue_2.values, full_residue_pair_df.PDB_ID.values):
+        res1_ID, res2_ID = str(res1_ID), str(res2_ID) # Some PDBs such as 3PGA name their chains using numbers, which results in some dataframes where the residue_1 and residue_2 columns are not strings but ints.
+
         res1_full_ID = res1_ID + res1_resname # Ex: 'A1G', that is residue A1 which is a Glycine
         res2_full_ID = res2_ID + res2_resname
         pair_of_full_residue_IDs = get_sorted_2_tuple((res1_full_ID, res2_full_ID)) # Sorting is needed to be able to find PDBs with the residue pair in the correct geometric arrangement later
@@ -289,7 +291,7 @@ def update_map_of_PDBs_with_all_residue_pairs(
     """
     ...
     """
-    updated_set_of_PDBs_with_all_residue_pairs = map_of_PDBs_with_all_residue_pairs.keys() & new_residue_pair_data.keys() # & = set intersection 
+    updated_set_of_PDBs_with_all_residue_pairs = map_of_PDBs_with_all_residue_pairs.keys() & new_residue_pair_data.keys() # & = set intersection
     
     for PDB_ID in list(map_of_PDBs_with_all_residue_pairs.keys()):
         if PDB_ID not in updated_set_of_PDBs_with_all_residue_pairs:
@@ -387,17 +389,19 @@ def filter_out_PDBs_with_unconnected_residue_pairs(
         concurrent_executor.submit(run_subgraph_monomorphism, motif_MST, pairs_of_residues):PDB_ID
         for PDB_ID, pairs_of_residues in PDBs_with_all_residue_pairs.items()
     }
+    PDBs_with_all_residue_pairs.clear() # Free some memory
 
     filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
     for future in as_completed(submited_futures):
         if future.exception():
             raise future.exception() # type: ignore
 
+        PDB_ID = submited_futures[future]
         monomorphism_checked_motifs = future.result()
+        
         if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif as a result of unconnected pairs of residues 
             continue
 
-        PDB_ID = submited_futures[future]
         filtered_PDBs_with_all_residue_pairs[PDB_ID] = monomorphism_checked_motifs
 
     return filtered_PDBs_with_all_residue_pairs
@@ -424,13 +428,14 @@ def solve_motif_MST(
                 PDBs_that_contain_the_residue_pair
             )
 
-    # Non-parallel version of filter_out_PDBs_with_unconnected_residue_pairs
-    #print(f'Filtering {len(map_of_PDBs_with_all_residue_pairs)} target motifs.')
+    # Non-parallel version of filter_out_PDBs_with_unconnected_residue_pairs. Using while loop + popitem()
+    # instead of a for loop because it reduces the RAM usage.
     add_resname_as_node_attribute(motif_MST) # Needed for subgraph monomorphism, see run_subgraph_monomorphism().
     filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
-    for PDB_ID, pairs_of_residues in map_of_PDBs_with_all_residue_pairs.items():
+    while map_of_PDBs_with_all_residue_pairs:
+        PDB_ID, pairs_of_residues = map_of_PDBs_with_all_residue_pairs.popitem()
         monomorphism_checked_motifs = run_subgraph_monomorphism(motif_MST, pairs_of_residues)
-
+        
         if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif as a result of unconnected pairs of residues 
             continue
 

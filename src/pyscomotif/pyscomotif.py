@@ -24,11 +24,11 @@ def command_line_interface() -> None:
 def check_index_path_option(ctx: Any, param: Any, value: Union[None, Path]) -> Path:
     if value:
         return value
-
+    
     default_index_folder_path: Path = ctx.params['database_path'] / 'pyScoMotif_index'
     # In Click, callbacks run AFTER type casting and its associated validation, so we have to re-run the validations.
-    click.Path(file_okay=False, dir_okay=True, readable=True, writable=True, path_type=Path).convert(default_index_folder_path, ctx=ctx, param=param)
- 
+    default_index_folder_path = click.Path(file_okay=False, dir_okay=True, readable=True, writable=True, path_type=Path).convert(default_index_folder_path, ctx=ctx, param=param)
+    
     return default_index_folder_path
 
 @command_line_interface.command()

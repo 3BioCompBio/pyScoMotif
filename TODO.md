@@ -1,5 +1,6 @@
 # Todo list
 
 - Could stop the solve_motif function earlier by checking if the current list of PDBs with all the pairs is empty, in which case we can stop computing the remaining pairs.
+- The motif search speed could be improved when dealing with many mutated motifs, see motif_search_with_ShareableList.py. The other major way to speed it up would be to optimize the subgraph monomorphism code, either by using a faster library implemented in C/C++ or a Cython version of NetworkX.
+- The current implementation uses compressed pickled files to store the index tables, but in some tests I've run, parquet files compressed with 'brotli' are 2x faster to read and require almost exactly the same amount of disk memory, which could further speed up the motif search. This would require a migration for already existing indexes that were created with the compressed pickled files approach, but this migration code would probably be very easy to implement and could be automated i.e. detect what file format is used in the index and, if its an old one, automatically update the format of the index files.
 - Currently we don't recalculate the sidechain CMR coordinates of mutated residues in the reference motif, although ideally we should do it.
-- The motif search speed could be improved when dealing with many mutated motifs, see motif_search_with_SareableList.py. Another way to speed it up would be to optimize the subgraph monomorphism code, either by using a faster library implemented in C/C++ or a Cython version of Networkx.

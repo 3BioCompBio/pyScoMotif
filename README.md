@@ -8,6 +8,8 @@ Typical use cases include the search of catalytic and binding sites.
 
 Reference publication: xx xx
 
+**LICENSE: pyScoMotif is free to use for non-commercial purposes. To use pyScoMotif for commercial purposes, please contact us.**
+
 ## Install
 To install, simply run:
 
@@ -18,11 +20,15 @@ If the install was successful, you should be able to type and run `pyscomotif` i
 
 ## Tutorial
 
-This tutorial shows how to use pyScoMotif, as well as some more advanced options such as [mutated motifs and position specific exchanges](#searching-for-similar-motifs-with-potential-mutations). A detailed explanation of each parameter available for the different commands can be displayed by typing `pyscomotif <command name> --help`.
+This tutorial shows how to use pyScoMotif, as well as some more advanced options such as [mutated motifs and position specific exchanges](###searching-for-similar-motifs-with-potential-mutations). A detailed explanation of each parameter available for the different commands can be displayed by typing `pyscomotif <command name> --help`.
+
+### Pre-built indexes
+
+To use pyScoMotif to search for similar motifs, we first need an index of the set of PDB files on which we want to perform the search. Given indexing large sets of PDB files such as the entire Protein Data Bank or AlphaFold2 (AF2) proteomes can take some time, pre-built indexes are available for download for the entire PDB, the AF2 global health proteomes and the AF2 human proteome at http://babylone.ulb.ac.be/pyScoMotif/data/.
 
 ### Creating an index
 
-To use pyScoMotif to search for similar motifs, we first have to index the set of PDB files on which we want to perform the search. For that, we use the `create-index` command, which has 2 mandatory parameters:
+If our pre-built indexes don't cover the PDBs you are interested in, then you will have to build an index yourself (don't panic, it's easy !). For that, we use the `create-index` command, which has 2 mandatory parameters:
 - The full path of the directory that contains our PDB files, which is given as the final argument of the command.
 - The file extension pattern of the PDB files, which can be specified with the `--pattern` option. 
 
@@ -37,7 +43,7 @@ pyscomotif create-index --pattern=*.pdb.gz --n_cores=6 /home/user/Downloads/UP00
 To update an index with new PDB files, see the `pyscomotif update-index --help` command.
 
 ### Searching for similar motifs
-Once we have indexed our set of PDB structures, we can perform the similar motif search. 
+Once we have the index of our set of PDB structures, we can perform the similar motif search. 
 
 We will showcase the search of the [serine protease catalytic site](https://www.ebi.ac.uk/thornton-srv/m-csa/entry/173/), which is a 3 residue motif (His-Asp-Ser) that catalyzes the proteolyses of peptide bonds.
 For that, we use the `motif-search` command, which has 3 mandatory parameters:

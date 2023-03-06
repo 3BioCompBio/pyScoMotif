@@ -143,9 +143,9 @@ def extract_residue_data(PDB_file_path: Path) -> UserDict[str, Residue]:
     add_C_alpha_sidechain_CMR_vector_attribute(residue_data)
 
     # The Biopython Residue objects contain a lot of data we are not interested in, so we replace them with our own Residue object 
-    # that only contains the data we actually care about. We also want to have access to the PDB's header description/title, which
-    # is why we use a UserDict which allows us to add that string as an attribute to the UserDict object instead of a key in the dictionary,
-    # which would be confusing as it's not a Residue object.
+    # that only contains the data we actually care about. 
+    # We also want to have access to the PDB's header description/title, which is why we use a UserDict which allows us to add that 
+    # string as an attribute to the UserDict object instead of a key in the dictionary, which would be confusing as it's not a Residue object.
     customized_residue_data = UserDict({
         residue_id:Residue(resname=protein_letters_3to1_extended[residue.resname], C_alpha=residue.C_alpha, sidechain_CMR=residue.sidechain_CMR, vector=residue.vector)
         for residue_id, residue in residue_data.items()
