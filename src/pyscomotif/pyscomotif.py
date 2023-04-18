@@ -15,8 +15,16 @@ from pyscomotif.indexing import create_index_folder, update_index_folder
 from pyscomotif.motif_search import search_index_for_PDBs_with_similar_motifs
 from pyscomotif.RMSD_calculation import calculate_RMSD_between_motif_and_similar_motifs
 
+DISCLAIMER = """
+\n
+DISCLAIMER: pyScoMotif is free to use for non-commercial purposes. To use pyScoMotif for commercial purposes, please contact us.
+pyScoMotif is developed by the 3BioInfo group from the ULB, Belgium.
+Reference paper: 'pyScoMotif: Discovery of similar 3D structural motifs across proteins'.
+Main developer: Gabriel Cia.
+\n
+"""
 
-@click.group(help='pyScoMotif: a tool for the discovery of similar 3D structural motifs across proteins.', context_settings={'max_content_width':2000})
+@click.group(help='pyScoMotif: a tool for the discovery of similar 3D structural motifs across proteins.', context_settings={'max_content_width':2000}, epilog=DISCLAIMER)
 def command_line_interface() -> None:
     pass
 
@@ -31,7 +39,8 @@ def check_index_path_option(ctx: Any, param: Any, value: Union[None, Path]) -> P
     
     return default_index_folder_path
 
-@command_line_interface.command()
+
+@command_line_interface.command(epilog=DISCLAIMER)
 @click.argument('database_path', type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True, path_type=Path))
 @click.option('--index_path', default=None, show_default=False, type=click.Path(file_okay=False, dir_okay=True, readable=True, writable=True, path_type=Path), 
               callback=check_index_path_option, help="Full path of the directory that will contain the index files. Defaults to <database_path>/pyScoMotif_index.")
@@ -58,10 +67,11 @@ def create_index(database_path: Path, index_path: Path, pattern: str, compressio
     create_index_folder(database_path, pattern, index_path, compression, n_cores)
     return
 
-@command_line_interface.command()
+
+@command_line_interface.command(epilog=DISCLAIMER)
 @click.argument('database_path', type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True, path_type=Path))
 @click.argument('index_path', type=click.Path(exists=True, file_okay=False, dir_okay=True, writable=True, readable=True, path_type=Path))
-@click.option('--pattern', type=str, default='*.pdb',
+@click.option('--pattern', type=str, default='*.pdb', show_default=True,
                help="File extension pattern of the PDB files in the database that the file detection algorithm should match. Examples: *.pdb, *.pdb.gz, *.ent , etcetc . Note the use of the '*' wildcard. Also note that only simple unix style patterns are accepted, complex regex patterns will fail. To know if your pattern works, test it with pathlib.Path.rglob.")
 @click.option('--n_cores', default=1, show_default=True,
                help='Number of cores to use.')
@@ -110,7 +120,7 @@ def check_residue_type_policy_option(ctx: Any, param: Any, value: str) -> Union[
 
     return position_specific_exchange
 
-@command_line_interface.command()
+@command_line_interface.command(epilog=DISCLAIMER)
 @click.argument('index_path', type=click.Path(exists=True, path_type=Path))
 @click.argument('PDB_file', type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path))
 @click.argument('motif', nargs=-1, callback=check_motif_argument) # -1 => Unlimited number of arguments
@@ -176,9 +186,3 @@ if __name__ == '__main__':
     #scalene_profiler.start()
     command_line_interface(max_content_width=2000) # max_content_width=2000 allows help texts to span the entire width of the terminal
     #scalene_profiler.stop()
-    
-
-# What if the distance is outside of the available distances, say C_alpha_distance of 25 angstroom in an index made with max 20 angstroom ???
-# Could stop the solve_motif function earlier by checking if the current list of PDBs with all the pairs is empty, in which case we can stop computing the remaining pairs.
-# Currently we don't recalculate the sidechain CMR coordinates of mutated residues in the reference motif, although in theory we should probably do it
-

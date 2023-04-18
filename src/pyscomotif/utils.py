@@ -3,7 +3,7 @@ import gzip
 import itertools
 import pickle
 from pathlib import Path
-from typing import Any, List, Tuple, Union
+from typing import Any, List, Tuple, Union, Iterable
 
 import numba
 import numpy as np
@@ -22,6 +22,8 @@ def get_sorted_2_tuple(tuple_: Tuple[Any, Any]) -> Tuple[Any, Any]:
 def sort_and_join_2_strings(str1: str, str2: str) -> str:
     return str1+str2 if str1 <= str2 else str2+str1
 
+def flatten_iterable(iterable: Iterable[Any]) -> Iterable[Any]:
+    return itertools.chain.from_iterable(iterable)
 
 def pickle_and_compress_python_object(python_object: Any, output_file_path: Path) -> None:
     """

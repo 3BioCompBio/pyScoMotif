@@ -9,16 +9,16 @@ import pandas as pd
 from tqdm import tqdm
 
 from pyscomotif.constants import (AMINO_ACID_ALPHABET,
-                                    AMINO_ACID_RELAXED_GROUPS_MAP,
-                                    INDEX_ANGLE_BIN_SIZE,
-                                    INDEX_DISTANCE_BIN_SIZE)
+                                  AMINO_ACID_RELAXED_GROUPS_MAP,
+                                  INDEX_ANGLE_BIN_SIZE,
+                                  INDEX_DISTANCE_BIN_SIZE)
 from pyscomotif.data_containers import Residue, Residue_pair_data
 from pyscomotif.index_folders_and_files import index_folder_exists
 from pyscomotif.residue_data_dicts import extract_residue_data
 from pyscomotif.utils import (
     angle_between_two_vectors,
-    detect_the_compression_algorithm_used_in_the_index, get_bin_number,
-    get_sorted_2_tuple, pairwise_euclidean_distance,
+    detect_the_compression_algorithm_used_in_the_index, flatten_iterable,
+    get_bin_number, get_sorted_2_tuple, pairwise_euclidean_distance,
     read_compressed_and_pickled_file, sort_and_join_2_strings)
 
 
@@ -163,10 +163,13 @@ def get_all_motif_MSTs_generator(motif_MST: nx.Graph, max_n_mutated_residues: in
     
 def get_all_pairs_of_residues_in_motif_MST(motif_MST: nx.Graph) -> Dict[Tuple[str,str], Residue_pair_data]:
     """
+    Returns all the residue pairs in motif_MST in an ordered manner such that, for all i, residue pairs between 0 and i form a connected graph. The order follows 
+    that of a Depth First Search (dfs). If the residue pairs were randomly ordered, we wouldn't be able to do the connectivity check 
+    in update_map_of_PDBs_with_all_residue_pairs, because the logic requires that new residue pairs are connected to already visited nodes.
     """
-    all_pairs_of_residues_in_motif_MST: Dict[Tuple[str,str], Residue_pair_data] = {}
+    MST_edges: List[Tuple[str, str]] = list(nx.edge_dfs(motif_MST)) # Ex: [('A1G', 'A3K'), ('A3K', 'A8N'), ...]
 
-    MST_edges: List[Tuple[str, str]] = list(motif_MST.edges) # Ex: [('A1G', 'A3K'), ('A3K', 'A8N'), ...]
+    all_pairs_of_residues_in_motif_MST: Dict[Tuple[str,str], Residue_pair_data] = {}
     for pair_of_full_residue_IDs in MST_edges:
         pair_of_full_residue_IDs = get_sorted_2_tuple(pair_of_full_residue_IDs) # Ordering is needed to make sure we only calculate each pair once, i.e avoid calculating the results of (A,B) and (B,A), as they are identical.
         
@@ -285,8 +288,11 @@ def get_PDBs_that_contain_the_residue_pair(
         
     return PDBs_that_contain_the_residue_pair
 
+def residue_pair_is_connected_to_visited_nodes(residue_pair: Tuple[str, str], visited_nodes: Set[str]) -> bool:
+    return residue_pair[0] in visited_nodes or residue_pair[1] in visited_nodes
+
 def update_map_of_PDBs_with_all_residue_pairs(
-        map_of_PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]], new_residue_pair_data: Dict[str, List[Tuple[str,str]]]
+        map_of_PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]], new_residue_pair_data: Dict[str, List[Tuple[str,str]]], visited_nodes_map: Dict[str, Set[str]]
     ) -> None:
     """
     ...
@@ -294,10 +300,25 @@ def update_map_of_PDBs_with_all_residue_pairs(
     updated_set_of_PDBs_with_all_residue_pairs = map_of_PDBs_with_all_residue_pairs.keys() & new_residue_pair_data.keys() # & = set intersection
     
     for PDB_ID in list(map_of_PDBs_with_all_residue_pairs.keys()):
+        # Drop PDBs that no longer have all the residue pairs
         if PDB_ID not in updated_set_of_PDBs_with_all_residue_pairs:
-            del map_of_PDBs_with_all_residue_pairs[PDB_ID] # We remove PDBs that no longer have all the residue pairs
-        else:
-            map_of_PDBs_with_all_residue_pairs[PDB_ID].extend(new_residue_pair_data[PDB_ID]) # We update the set of residue pairs of the PDBs that have all the residue pairs
+            del map_of_PDBs_with_all_residue_pairs[PDB_ID]
+            del visited_nodes_map[PDB_ID]
+            continue
+        
+        # Connectivity check. New residue pairs that are not connected to already visited nodes can be dropped, and if all are droped then we can also drop the PDB
+        connectivity_checked_residue_pairs: List[Tuple[str,str]] = [
+            residue_pair
+            for residue_pair in new_residue_pair_data[PDB_ID]
+            if residue_pair_is_connected_to_visited_nodes(residue_pair, visited_nodes_map[PDB_ID])
+        ]
+        if not connectivity_checked_residue_pairs:
+            del map_of_PDBs_with_all_residue_pairs[PDB_ID]
+            del visited_nodes_map[PDB_ID]
+            continue
+
+        map_of_PDBs_with_all_residue_pairs[PDB_ID].extend(connectivity_checked_residue_pairs) # Update the list of residue pairs of the PDB
+        visited_nodes_map[PDB_ID].update(set(flatten_iterable(connectivity_checked_residue_pairs)))
 
     return
 
@@ -307,19 +328,21 @@ def find_PDBs_with_all_residue_pairs(
     ) -> Dict[str, List[Tuple[str,str]]]:
     """
     """
-    # The algorithm determines which PDBs contain all the residue pairs of a given motif MST by simply iterating over each residue pair 
-    # and calculating the intersection between the current map of PDBs with all residue pairs and the PDBs that contain
-    # the given residue pair that is being checked (i.e iterative intersection).
+    # The algorithm determines which PDBs contain all the residue pairs of a given motif MST by iterating over each residue pair and calculating the 
+    # intersection between the current map of PDBs with all residue pairs and the PDBs that contain the given residue pair that is being 
+    # checked (i.e iterative intersection). A connectivity check between the already determined residue pairs and the new ones is also performed to remove PDBs 
+    # that have the reside pairs but are not connected and therefore don't form a motif (see update_map_of_PDBs_with_all_residue_pairs).
     all_pairs_of_residues_to_check = get_all_pairs_of_residues_in_motif_MST(motif_MST)
-    
+
     submitted_futures: List[Future[Dict[str, List[Tuple[str,str]]]]] = [
         concurrent_executor.submit(get_PDBs_that_contain_the_residue_pair, pair_of_full_residue_IDs, residue_pair_data, distance_delta_thr, angle_delta_thr, index_folder_path, compression)
         for pair_of_full_residue_IDs, residue_pair_data in all_pairs_of_residues_to_check.items()
     ]
-
+    
     map_of_PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]]
     map_of_PDBs_with_all_residue_pairs_initialized_flag: bool = False
-    for future in as_completed(submitted_futures):
+    visited_nodes_map: Dict[str, Set[str]] # Used for connectivity check
+    for future in submitted_futures:
         if future.exception():
             raise future.exception() # type: ignore
 
@@ -331,13 +354,18 @@ def find_PDBs_with_all_residue_pairs(
         if map_of_PDBs_with_all_residue_pairs_initialized_flag == False:
             map_of_PDBs_with_all_residue_pairs = defaultdict(list, PDBs_that_contain_the_residue_pair)
             map_of_PDBs_with_all_residue_pairs_initialized_flag = True
+            visited_nodes_map = {
+                PDB_ID:set(flatten_iterable(list_of_residue_pairs))
+                for PDB_ID, list_of_residue_pairs in map_of_PDBs_with_all_residue_pairs.items()
+            }
 
         else:
             update_map_of_PDBs_with_all_residue_pairs(
                 map_of_PDBs_with_all_residue_pairs, 
-                PDBs_that_contain_the_residue_pair
+                PDBs_that_contain_the_residue_pair,
+                visited_nodes_map
             )
-        
+
     return map_of_PDBs_with_all_residue_pairs
 
 def add_resname_as_node_attribute(graph: nx.Graph) -> None:
@@ -353,6 +381,11 @@ def run_subgraph_monomorphism(motif_MST: nx.Graph, pairs_of_residues: List[Tuple
     candidate_PDB_graph = nx.Graph(pairs_of_residues)
     add_resname_as_node_attribute(candidate_PDB_graph)
 
+    # NOTE: We don't need to use the edge_matcher functionality of the GraphMatcher because in the previous step we performed a connectivity check,
+    # which ensures that each residue pair of the candidate PDB is in the correct geometrical arrangement AND connected to a residue pair. 
+    # If the connectivity check had not been performed, candidate PDBs with residue pairs in the correct geometrical arrangement BUT connected in
+    # the wrong way would pass the monomorphism check given it does not check edge values, only the residue types. This kind of edge case can for example happen
+    # when an epitope has a chain of repeating residue pairs (i.e (S,T),(T,S),(S,T), ...).
     graph_matcher = nx.algorithms.isomorphism.GraphMatcher(
         G1 = candidate_PDB_graph, G2 = motif_MST, 
         node_match = lambda node1,node2: node1['resname'] == node2['resname'] # Match based on residue name
@@ -398,8 +431,7 @@ def filter_out_PDBs_with_unconnected_residue_pairs(
 
         PDB_ID = submited_futures[future]
         monomorphism_checked_motifs = future.result()
-        
-        if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif as a result of unconnected pairs of residues 
+        if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif 
             continue
 
         filtered_PDBs_with_all_residue_pairs[PDB_ID] = monomorphism_checked_motifs
@@ -415,28 +447,34 @@ def solve_motif_MST(
     # Non-parallel version of find_PDBs_with_all_residue_pairs
     map_of_PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]]
     map_of_PDBs_with_all_residue_pairs_initialized_flag: bool = False
+    visited_nodes_map: Dict[str, Set[str]] # Used for connectivity check
     for pair_of_full_residue_IDs, residue_pair_data in get_all_pairs_of_residues_in_motif_MST(motif_MST).items():
         PDBs_that_contain_the_residue_pair = get_PDBs_that_contain_the_residue_pair(pair_of_full_residue_IDs, residue_pair_data, distance_delta_thr, angle_delta_thr, index_folder_path, compression)
         
         if map_of_PDBs_with_all_residue_pairs_initialized_flag == False:
             map_of_PDBs_with_all_residue_pairs = defaultdict(list, PDBs_that_contain_the_residue_pair)
             map_of_PDBs_with_all_residue_pairs_initialized_flag = True
+            visited_nodes_map = {
+                PDB_ID:set(flatten_iterable(list_of_residue_pairs))
+                for PDB_ID, list_of_residue_pairs in map_of_PDBs_with_all_residue_pairs.items()
+            }
 
         else:
             update_map_of_PDBs_with_all_residue_pairs(
                 map_of_PDBs_with_all_residue_pairs, 
-                PDBs_that_contain_the_residue_pair
+                PDBs_that_contain_the_residue_pair,
+                visited_nodes_map
             )
 
     # Non-parallel version of filter_out_PDBs_with_unconnected_residue_pairs. Using while loop + popitem()
-    # instead of a for loop because it reduces the RAM usage.
+    # instead of a for loop to limit RAM usage.
     add_resname_as_node_attribute(motif_MST) # Needed for subgraph monomorphism, see run_subgraph_monomorphism().
     filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
     while map_of_PDBs_with_all_residue_pairs:
         PDB_ID, pairs_of_residues = map_of_PDBs_with_all_residue_pairs.popitem()
         monomorphism_checked_motifs = run_subgraph_monomorphism(motif_MST, pairs_of_residues)
         
-        if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif as a result of unconnected pairs of residues 
+        if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif
             continue
 
         filtered_PDBs_with_all_residue_pairs[PDB_ID] = monomorphism_checked_motifs
@@ -455,13 +493,14 @@ def get_PDBs_with_similar_motifs(
     """
     motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[nx.Graph]]] = {}
     n_motifs_to_solve = sum(1 for _ in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data))
+
     with ProcessPoolExecutor(max_workers=n_cores) as concurrent_executor:
         # Residue-pair level parallelisation
-        if n_motifs_to_solve < n_cores:
+        if n_motifs_to_solve <= n_cores:
             for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data):
                 PDBs_with_all_residue_pairs = find_PDBs_with_all_residue_pairs(motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression, concurrent_executor)
                 filtered_PDBs_with_all_residue_pairs = filter_out_PDBs_with_unconnected_residue_pairs(PDBs_with_all_residue_pairs, motif_MST, concurrent_executor)
-                
+
                 if filtered_PDBs_with_all_residue_pairs:
                     motif_MST_filtered_PDBs_map[motif_MST] = filtered_PDBs_with_all_residue_pairs
         
