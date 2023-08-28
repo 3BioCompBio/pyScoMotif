@@ -1,6 +1,8 @@
 
 import concurrent.futures
+from collections import UserDict
 from concurrent.futures import Future, ProcessPoolExecutor
+import multiprocessing as mp
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -41,7 +43,7 @@ def get_coordinates_of_motif_residues(residue_data: Dict[str,Residue], ordered_r
     return coordinates
 
 def calculate_RMSD_between_two_motifs(
-        similar_motif: nx.Graph, reference_motif_residues_data: Dict[str, Residue], similar_motif_residues_data: Dict[str, Residue], RMSD_atoms: str, 
+        similar_motif: nx.Graph, reference_motif_residues_data: Dict[str, Residue], candidate_PDB_residue_data: Dict[str, Residue], RMSD_atoms: str, 
     ) -> float:
     """
     """
@@ -53,7 +55,7 @@ def calculate_RMSD_between_two_motifs(
     ordered_target_residue_IDs: List[str] = [full_residue_ID[:-1] for full_residue_ID in residue_mapping_dict.keys()]
 
     reference_coords = get_coordinates_of_motif_residues(reference_motif_residues_data, ordered_reference_residue_IDs, RMSD_atoms)
-    target_coords = get_coordinates_of_motif_residues(similar_motif_residues_data, ordered_target_residue_IDs, RMSD_atoms)
+    target_coords = get_coordinates_of_motif_residues(candidate_PDB_residue_data, ordered_target_residue_IDs, RMSD_atoms)
     
     qcp_superimposer = QCPSuperimposer()
 
@@ -64,16 +66,21 @@ def calculate_RMSD_between_two_motifs(
     
     return RMSD
 
-def get_similar_motif_residues_data(residue_data: Dict[str, Residue], nodes: List[str]) -> Dict[str, Residue]:
+def calculate_RMSD_values(
+        residue_data_folder_path: Path,compression: str, PDB_ID :str, list_of_similar_motifs_in_PDB: List[nx.Graph], 
+        reference_motif_residues_data: Dict[str, Residue], RMSD_atoms: str
+    ) -> UserDict[nx.Graph, float]:
     """
-    Instead of giving to each parallel executor the data of all the residues we only give it the subset needed for the motif. 
     """
-    similar_motif_residues_data: Dict[str, Residue] = {}
-    for full_residue_ID in nodes:
-        residue_ID = full_residue_ID[:-1]
-        similar_motif_residues_data[residue_ID] = residue_data[residue_ID]
+    candidate_PDB_residue_data = read_compressed_and_pickled_file(residue_data_folder_path / f'{PDB_ID}.{compression}')
+    
+    similar_motif_RMSD_map: UserDict[nx.Graph, float] = UserDict()
+    for similar_motif in list_of_similar_motifs_in_PDB:
+        RMSD = calculate_RMSD_between_two_motifs(similar_motif, reference_motif_residues_data, candidate_PDB_residue_data, RMSD_atoms)
+        similar_motif_RMSD_map[similar_motif] = RMSD
 
-    return similar_motif_residues_data
+    similar_motif_RMSD_map.header_description: str = candidate_PDB_residue_data.header_description # type: ignore
+    return similar_motif_RMSD_map
 
 def calculate_number_of_mutations(motif_MST: nx.Graph, solved_motif_MST: nx.Graph) -> int:
     """
@@ -100,41 +107,43 @@ def calculate_RMSD_between_motif_and_similar_motifs(
         motif=tuple(full_residue_ID[:-1] for full_residue_ID in motif_MST.nodes) # Transform MST node identifiers from full residue ID to standard residue ID, e.g: A41G -> A41
     )
     
-    submitted_futures: Dict[Future[float], Tuple[nx.Graph, str, nx.Graph, str]] = {}
-    with ProcessPoolExecutor(max_workers=n_cores) as executor:
-        # Each solved motif has a list of PDBs with a similar motif, and each PDB potentially has more than one similar motif -> 3 nested loops
+    submitted_futures: Dict[Future[UserDict[nx.Graph, float]], Tuple[nx.Graph, str]] = {}
+    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context('fork')) as executor:
+        # Each solved motif has a list of PDBs with a similar motif, and each PDB potentially has more than one similar motif
         for solved_motif_MST, solutions_to_motif in PDBs_with_similar_motifs.items():
             for PDB_ID, list_of_similar_motifs_in_PDB in solutions_to_motif.items():
-                solution_PDB_residue_data = read_compressed_and_pickled_file(residue_data_folder_path / f'{PDB_ID}.{compression}')
-                solution_PDB_header_description: str = solution_PDB_residue_data.header_description
-                for similar_motif in list_of_similar_motifs_in_PDB:
-                    similar_motif_residues_data = get_similar_motif_residues_data(solution_PDB_residue_data, list(similar_motif.nodes))
-
-                    future = executor.submit(
-                        calculate_RMSD_between_two_motifs, 
-                        similar_motif, 
-                        reference_motif_residues_data, 
-                        similar_motif_residues_data, 
-                        RMSD_atoms
-                    )
-                    submitted_futures[future] = (solved_motif_MST, PDB_ID, similar_motif, solution_PDB_header_description)
-            
+                future = executor.submit(
+                    calculate_RMSD_values,
+                    residue_data_folder_path,
+                    compression,
+                    PDB_ID,
+                    list_of_similar_motifs_in_PDB, 
+                    reference_motif_residues_data, 
+                    RMSD_atoms
+                )
+                submitted_futures[future] = (solved_motif_MST, PDB_ID)
     
+
     pyScoMotif_results_dict: Dict[str, List[Any]] = {
         'matched_motif':[], 'similar_motif_found':[], 'RMSD':[], 'n_mutations':[], 'PDB_ID':[], 'header_description':[]
     }
     for future in concurrent.futures.as_completed(submitted_futures):
-        solved_motif_MST, PDB_ID, similar_motif, header_description = submitted_futures[future]
-        residue_mapping_dict: Dict[str,str] = similar_motif.residue_mapping_dict # Mapping between the solved motif's full residue IDs and the full residue IDs of the similar motif found
-        n_mutations = calculate_number_of_mutations(motif_MST, solved_motif_MST)
-        RMSD = future.result()
+        solved_motif_MST, PDB_ID = submitted_futures[future]
+        similar_motif_RMSD_values_map = future.result() # Each PDB potentially has more than one similar motif
+        header_description: str = similar_motif_RMSD_values_map.header_description # type: ignore
 
-        pyScoMotif_results_dict['matched_motif'].append(' '.join(residue_mapping_dict.values()))
-        pyScoMotif_results_dict['similar_motif_found'].append(' '.join(residue_mapping_dict.keys()))
-        pyScoMotif_results_dict['RMSD'].append(RMSD)
-        pyScoMotif_results_dict['n_mutations'].append(n_mutations)
-        pyScoMotif_results_dict['PDB_ID'].append(PDB_ID)
-        pyScoMotif_results_dict['header_description'].append(header_description)
+        for similar_motif, RMSD in similar_motif_RMSD_values_map.items():
+            residue_mapping_dict: Dict[str,str] = similar_motif.residue_mapping_dict # Mapping between the solved motif's full residue IDs and the full residue IDs of the similar motif found
+            n_mutations = calculate_number_of_mutations(motif_MST, solved_motif_MST)
+
+            pyScoMotif_results_dict['matched_motif'].append(' '.join(residue_mapping_dict.values()))
+            pyScoMotif_results_dict['similar_motif_found'].append(' '.join(residue_mapping_dict.keys()))
+            pyScoMotif_results_dict['RMSD'].append(RMSD)
+            pyScoMotif_results_dict['n_mutations'].append(n_mutations)
+            pyScoMotif_results_dict['PDB_ID'].append(PDB_ID)
+            pyScoMotif_results_dict['header_description'].append(header_description)
+        
     
     pyScoMotif_results_df = pd.DataFrame(pyScoMotif_results_dict)
-    return pyScoMotif_results_df[pyScoMotif_results_df.RMSD <= RMSD_threshold].sort_values(by=['n_mutations', 'RMSD'], ignore_index=True)
+    pyScoMotif_results_df = pyScoMotif_results_df[pyScoMotif_results_df.RMSD <= RMSD_threshold].sort_values(by=['n_mutations', 'RMSD'], ignore_index=True)
+    return pyScoMotif_results_df

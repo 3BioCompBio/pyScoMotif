@@ -12,6 +12,8 @@ Reference publication: xx xx
 
 ## Install
 
+**Note that a Python version >= 3.9 is required.**
+
 To install pyScoMotif, simply run:
 
 ```
@@ -20,11 +22,13 @@ pip install pyscomotif
 
 If the install was successful, you should be able to type and run `pyscomotif` in your terminal.
 
-**Note that a Python version >= 3.9 is required.** Dependencies are listed in the `pyproject.toml` file.
+Dependencies are listed in the `pyproject.toml` file.
 
 ## Tutorial
 
 This tutorial shows how to use pyScoMotif, as well as some more advanced options such as [mutated motifs and position specific exchanges](#searching-for-similar-motifs-with-potential-mutations). A detailed explanation of each parameter available for the different commands can be displayed by typing `pyscomotif <command name> --help`.
+
+Note that pyScoMotif's speed is highly dependant on the computer/cluster hardware, and therefore timings could be different than those reported in our publication.
 
 ### Pre-built indexes
 

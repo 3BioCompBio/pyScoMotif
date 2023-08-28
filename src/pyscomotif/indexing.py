@@ -1,5 +1,6 @@
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple
 from typing_extensions import TypeAlias
@@ -130,11 +131,12 @@ def create_index_files_of_the_residue_pair_combination(residue_pair: str, PDB_fi
             dtype={'C_alpha_distance':float,'sidechain_CMR_distance':float, 'vector_angle':float, 'residue_1:':str, 'residue_2':str, 'PDB_ID':str},
             engine='c'
         )
+        
         output_file_path=binned_data_csv_file_path.with_suffix(f'.{compression}') # Ex: /home/user_name/database_folder/pyScoMotif_index/index/AG_4_4_5.bz2
         if output_file_path.exists(): 
             # Update mode
             bin_index_data_df = pd.concat((bin_index_data_df, read_compressed_and_pickled_file(output_file_path)), axis=0, copy=False) 
-        
+
         # Replace the csv file with the pickled and compressed pandas dataframe
         binned_data_csv_file_path.unlink()
         pickle_and_compress_python_object(
@@ -156,7 +158,7 @@ def update_file_of_indexed_PDB_files(index_folder: Path, new_PDB_IDs: Iterator[s
 def index_PDB_files(PDB_files_to_index: List[Path], index_folder_path: Path, compression: str, n_cores: int) -> None:
     """
     """
-    with ProcessPoolExecutor(max_workers=n_cores) as executor:
+    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context('fork')) as executor:
         # We first parse all the PDB files to extract and format the residue data of interest (residue name, C alpha coordinates, etc), 
         # which is then saved as a pickle and compressed file. This is done to avoid parsing anew each PDB file 210 times, instead 
         # we just load these files which contain a python dictionary, which is ~15x faster.
@@ -213,7 +215,7 @@ def update_index_folder(database_path: Path, pattern: str, index_folder_path: Pa
         PDB_ID = get_PDB_ID_from_file_path(PDB_file)
         if PDB_ID not in set_of_already_indexed_PDBs:
             PDB_files_to_index.append(PDB_file)
-    del set_of_already_indexed_PDBs # No longer needed
+    del set_of_already_indexed_PDBs
     
     if not PDB_files_to_index:
         raise ValueError(f"No new files were found that match the pattern {pattern}.")

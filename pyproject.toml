@@ -5,7 +5,7 @@ build-backend = "flit_core.buildapi"
 [project]
 name = "pyscomotif"
 authors = [{name = "Gabriel Cia", email = "gabriel-_cia@hotmail.com"}]
-version = "0.9.28"
+version = "0.9.32"
 dependencies = ["numba", "click", "biopython <=1.79", "networkx", "scipy", "pandas", "numpy", "typing_extensions", "tqdm"]
 requires-python = ">=3.9"
 readme = "README.md"

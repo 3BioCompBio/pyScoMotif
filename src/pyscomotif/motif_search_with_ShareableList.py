@@ -10,6 +10,7 @@ import itertools
 import pickle
 from collections import defaultdict
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 from multiprocessing.shared_memory import ShareableList
 from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple, Union
@@ -573,7 +574,7 @@ def get_PDBs_with_similar_motifs(
     """
     motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[nx.Graph]]] = {}
     n_motifs_to_solve = sum(1 for _ in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, reference_motif_residues_data))
-    with ProcessPoolExecutor(max_workers=n_cores) as concurrent_executor:
+    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context('fork')) as concurrent_executor:
         if n_motifs_to_solve < n_cores:
             residue_pair_level_parallelisation(
                 reference_motif_MST, 
