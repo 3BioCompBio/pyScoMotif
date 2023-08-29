@@ -6,7 +6,7 @@ pyScoMotif is a Python package that enables the rapid search of similar 3D struc
 
 Typical use cases include the search of catalytic and binding sites.
 
-Reference publication: xx xx
+Reference publication: "pyScoMotif: Discovery of similar 3D structural motifs across proteins". Gabriel Cia, Jean Kwasigroch, Basile Stamatopoulos, Marianne Rooman, Fabrizio Pucci. bioRxiv 2023.08.27.554982; doi: https://doi.org/10.1101/2023.08.27.554982
 
 **LICENSE: pyScoMotif is free to use for non-commercial purposes. To use pyScoMotif for commercial purposes, please contact us.**
 
