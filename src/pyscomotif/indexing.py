@@ -1,3 +1,4 @@
+from collections import defaultdict
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -83,15 +84,20 @@ def write_index_data_to_corresponding_bin_files(cumulated_index_data: index_data
     # leads to half open intervals.
     # Distance bin example: value = 2.3 -> 2.3 //  1 = 2 = bin number
     # Angle bin example   : value = 160 -> 160 // 20 = 8 = bin number
+    index_file_rows_map: Dict[str,List[str]] = defaultdict(list)
     for row in cumulated_index_data:
         C_alpha_distance, sidechain_CMR_distance, vector_angle_bin = row[0], row[1], row[2]
 
         C_alpha_distance_bin = get_bin_number(C_alpha_distance, INDEX_DISTANCE_BIN_SIZE)
         sidechain_CMR_distance_bin = get_bin_number(sidechain_CMR_distance, INDEX_DISTANCE_BIN_SIZE)
         vector_angle_bin = get_bin_number(vector_angle_bin, INDEX_ANGLE_BIN_SIZE)
+        
+        index_file = f'{residue_pair}_{C_alpha_distance_bin}_{sidechain_CMR_distance_bin}_{vector_angle_bin}.csv'
+        index_file_rows_map[index_file].append(','.join((str(element) for element in row)) + '\n')
 
-        with open(index_folder / f'{residue_pair}_{C_alpha_distance_bin}_{sidechain_CMR_distance_bin}_{vector_angle_bin}.csv', 'a') as file_handle:
-            file_handle.write(','.join((str(element) for element in row)) + '\n')
+    for index_file, rows in index_file_rows_map.items():
+        with open(index_folder / index_file, 'a') as file_handle:
+            file_handle.write(''.join(rows))
 
     return
 
@@ -114,7 +120,7 @@ def create_index_files_of_the_residue_pair_combination(residue_pair: str, PDB_fi
         
         # To limit RAM usage even when dealing with hundreds of thousands of PDB files, the index data is periodically written
         # to the corresponding csv files on disk.
-        if len(cumulated_index_data) >= 1000:
+        if len(cumulated_index_data) >= 10_000:
             write_index_data_to_corresponding_bin_files(cumulated_index_data, residue_pair, index_folder)
             cumulated_index_data.clear()
 

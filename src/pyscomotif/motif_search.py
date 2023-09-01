@@ -3,7 +3,7 @@ from collections import defaultdict
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, Iterator, List, Set, Tuple, Union
+from typing import Dict, Iterator, List, Set, Tuple, Union, Any
 
 import networkx as nx
 import pandas as pd
@@ -510,12 +510,14 @@ def get_PDBs_with_similar_motifs(
         # Motif level parallelisation. When having to check a large number of motifs as a result of mutated residues provided 
         # by the user, motif level parallelisation is ~35% faster than residue-pair level parallelisation.
         else:
-            submitted_futures = {
-                concurrent_executor.submit(solve_motif_MST, motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression):motif_MST
-                for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data)
-            }
-
             tqdm_progress_bar = get_tqdm_progress_bar(total=n_motifs_to_solve, desc='Searched motifs')
+            submitted_futures: Dict[Future[Any], nx.Graph] = {}
+            for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data):
+                future = concurrent_executor.submit(solve_motif_MST, motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression)
+                future.add_done_callback(lambda _:tqdm_progress_bar.update())
+
+                submitted_futures[future] = motif_MST
+            
             for future in as_completed(submitted_futures):
                 if future.exception():
                     raise future.exception() # type: ignore
@@ -524,8 +526,6 @@ def get_PDBs_with_similar_motifs(
                 if filtered_PDBs_with_all_residue_pairs:
                     motif_MST = submitted_futures[future]
                     motif_MST_filtered_PDBs_map[motif_MST] = filtered_PDBs_with_all_residue_pairs
-
-                tqdm_progress_bar.update()
 
     return motif_MST_filtered_PDBs_map
 
