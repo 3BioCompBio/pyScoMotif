@@ -15,6 +15,7 @@ from Bio.PDB.QCPSuperimposer import QCPSuperimposer
 from pyscomotif.data_containers import Residue
 from pyscomotif.motif_search import extract_motif_residues_from_PDB_file
 from pyscomotif.utils import (
+    BoundedProcessPoolExecutor,
     detect_the_compression_algorithm_used_in_the_index,
     read_compressed_and_pickled_file)
 
@@ -108,7 +109,8 @@ def calculate_RMSD_between_motif_and_similar_motifs(
     )
     
     submitted_futures: Dict[Future[UserDict[nx.Graph, float]], Tuple[nx.Graph, str]] = {}
-    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context('fork')) as executor:
+    #with ProcessPoolExecutor(max_workers=n_cores) as executor:
+    with BoundedProcessPoolExecutor(max_workers=n_cores, max_submited_tasks=2*n_cores) as executor:
         # Each solved motif has a list of PDBs with a similar motif, and each PDB potentially has more than one similar motif
         for solved_motif_MST, solutions_to_motif in PDBs_with_similar_motifs.items():
             for PDB_ID, list_of_similar_motifs_in_PDB in solutions_to_motif.items():

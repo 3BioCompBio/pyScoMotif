@@ -17,6 +17,7 @@ from pyscomotif.data_containers import Residue, Residue_pair_data
 from pyscomotif.index_folders_and_files import index_folder_exists
 from pyscomotif.residue_data_dicts import extract_residue_data
 from pyscomotif.utils import (
+    BoundedProcessPoolExecutor,
     angle_between_two_vectors,
     detect_the_compression_algorithm_used_in_the_index, flatten_iterable,
     get_bin_number, get_sorted_2_tuple, pairwise_euclidean_distance,
@@ -495,7 +496,8 @@ def get_PDBs_with_similar_motifs(
     motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[nx.Graph]]] = {}
     n_motifs_to_solve = sum(1 for _ in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data))
 
-    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context('fork')) as concurrent_executor:
+    #with ProcessPoolExecutor(max_workers=n_cores) as concurrent_executor:
+    with BoundedProcessPoolExecutor(max_workers=n_cores, max_submited_tasks=2*n_cores) as concurrent_executor:
         # Residue-pair level parallelisation
         if n_motifs_to_solve <= n_cores:
             for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data):
