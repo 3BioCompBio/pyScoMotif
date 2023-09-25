@@ -1,10 +1,9 @@
 from collections import defaultdict
-import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterator, List, Set, Tuple
+from typing import Dict, Iterator, List, Set, Tuple, Callable
 
 import pandas as pd
+from joblib import Parallel, delayed
 from typing_extensions import TypeAlias
 
 from pyscomotif.constants import (INDEX_ANGLE_BIN_SIZE,
@@ -15,7 +14,6 @@ from pyscomotif.index_folders_and_files import create_index_folder_tree
 from pyscomotif.residue_data_dicts import \
     generate_compressed_residue_data_from_PDB_file
 from pyscomotif.utils import (
-    BoundedProcessPoolExecutor,
     detect_the_compression_algorithm_used_in_the_index,
     generate_all_pairs_of_residues_combinations, get_bin_number,
     get_C_alpha_distance, get_PDB_ID_from_file_path,
@@ -164,19 +162,28 @@ def update_file_of_indexed_PDB_files(index_folder: Path, new_PDB_IDs: Iterator[s
 def index_PDB_files(PDB_files_to_index: List[Path], index_folder_path: Path, compression: str, n_cores: int) -> None:
     """
     """
-    #with ProcessPoolExecutor(max_workers=n_cores) as executor:
-    with BoundedProcessPoolExecutor(max_workers=n_cores, max_submited_tasks=2*n_cores) as executor:
+    with Parallel(n_jobs=n_cores, return_as='generator') as parallel:
         # We first parse all the PDB files to extract and format the residue data of interest (residue name, C alpha coordinates, etc), 
         # which is then saved as a pickle and compressed file. This is done to avoid parsing anew each PDB file 210 times, instead 
         # we just load these files which contain a python dictionary, which is ~15x faster.
-        for PDB_file_path in PDB_files_to_index:
-            executor.submit(generate_compressed_residue_data_from_PDB_file, PDB_file_path, index_folder_path, compression)
+        delayed_func_1: Callable[[Path, Path, str], object] = delayed(generate_compressed_residue_data_from_PDB_file)
+        results_generator_1: Iterator[None] = parallel(
+            delayed_func_1(PDB_file_path, index_folder_path, compression) 
+            for PDB_file_path in PDB_files_to_index
+        )
+        for _ in results_generator_1:
+            pass
         
         # Each worker processes 1 of the 210 residue pair combinations. The output is a series of pickled and compressed files for each residue pair that contain 
         # the data of a bin e.g .../pyScoMotif_index/index/AG_4_4_5.bz2 contains the occurences of all AG pairs with a C alpha distance between [4, 5) angstrooms, 
         # a CMR distance between [4, 5) and a vector angle between [100, 120) degrees.
-        for combination in generate_all_pairs_of_residues_combinations():
-            executor.submit(create_index_files_of_the_residue_pair_combination, combination, PDB_files_to_index, index_folder_path, compression)
+        delayed_func_2: Callable[[str, List[Path], Path, str], object] = delayed(create_index_files_of_the_residue_pair_combination)
+        results_generator_2: Iterator[None] = parallel(
+            delayed_func_2(combination, PDB_files_to_index, index_folder_path, compression) 
+            for combination in generate_all_pairs_of_residues_combinations()
+        )
+        for _ in results_generator_2:
+            pass
 
 
     # To allow users to update the index with new structures we need to keep track of the PDB files that have already been indexed.

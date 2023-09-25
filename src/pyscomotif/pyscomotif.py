@@ -126,6 +126,8 @@ def check_residue_type_policy_option(ctx: Any, param: Any, value: str) -> Union[
 @click.argument('motif', nargs=-1, callback=check_motif_argument) # -1 => Unlimited number of arguments
 @click.option('--results_output_path', type=click.Path(path_type=Path), default=None, callback=check_results_output_path_option,
               help='Full path of the csv file where the results will be saved (e.g: /home/user/Downloads/similar_motifs.csv). If not given, the results will be saved in the current working directory in a file named with the current timestamp (e.g: pyScoMotif_result_14230214102022.csv)')
+@click.option('--sort_results', is_flag=True, default=True, show_default=True,
+               help="Sort the results output file by number of mutations and RMSD. Set to False if results file is too big and doesn't fit into RAM.")
 @click.option('--residue_type_policy', default='strict', callback=check_residue_type_policy_option,
                help='''Option to control whether mutated versions of the query motif should also be tested. There are 4 possible values: 1) strict (DEFAULT): only similar motifs with strictly identical residues to the query motif are searched. 2) relaxed: finds PDBs with motifs that are similar but with potential mutated residues by allowing residues to mutate according to the residue group they are part of, such as polar, positively charged, aromatic, etcetc (see our Github for the exact grouping of the residues). 3) fully_relaxed: similar to the relaxed mode, but residues can be mutated to any of the 20 possible residues. 4) custom position specific exchange: specify possible residue mutations for the desired positions in your motif using a JSON formated string (e.g: '{"A1":"KL", "A2":"YW", "A5":"E"}'. Note the use of single and double quotes).\n To control the maximum number of simultaneous mutations, see the max_n_mutated_residues option.''')
 @click.option('--max_n_mutated_residues', type=click.IntRange(min=1), default=1, show_default=True,
@@ -141,7 +143,7 @@ def check_residue_type_policy_option(ctx: Any, param: Any, value: str) -> Union[
 @click.option('--n_cores', default=1, show_default=True,
                help='Number of cores to use. Note that using high distance_delta_thr and/or angle_delta_thr values in conjuction with many cores could result in very high RAM usage.')
 def motif_search(
-    index_path: Path, pdb_file: Path, motif: Tuple[str, ...], results_output_path: Path, 
+    index_path: Path, pdb_file: Path, motif: Tuple[str, ...], results_output_path: Path, sort_results: bool,
     residue_type_policy: Union[str, Dict[str,List[str]]], max_n_mutated_residues: int, distance_delta_thr: float, 
     angle_delta_thr: float, rmsd_atoms: str, rmsd_threshold: float, n_cores: int
     ) -> None:
@@ -166,19 +168,17 @@ def motif_search(
         n_cores=n_cores
     )
 
-    pyScoMotif_results_df = calculate_RMSD_between_motif_and_similar_motifs(
+    calculate_RMSD_between_motif_and_similar_motifs(
         motif_MST=motif_MST, 
         PDB_file=pdb_file, 
         PDBs_with_similar_motifs=PDBs_with_similar_motifs, 
         index_folder_path=index_path,
         RMSD_atoms=rmsd_atoms,
         RMSD_threshold=rmsd_threshold,
-        n_cores=n_cores
+        n_cores=n_cores,
+        results_output_path=results_output_path,
+        sort_results=sort_results
     )
-
-    pyScoMotif_results_df.to_csv(results_output_path)
-    if len(pyScoMotif_results_df) == 0:
-        print('No PDB structure with a similar motif was found.')
 
     return
 

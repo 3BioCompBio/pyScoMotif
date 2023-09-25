@@ -4,8 +4,6 @@ import itertools
 import pickle
 from pathlib import Path
 from typing import Any, Iterable, List, Tuple, Union
-from threading import BoundedSemaphore
-from concurrent.futures import ProcessPoolExecutor, Future
 
 import numba
 import numpy as np
@@ -107,28 +105,3 @@ def get_sidechain_CMR_distance(residue_1: Residue, residue_2: Residue) -> float:
 
 def get_vector_angle(residue_1: Residue, residue_2: Residue) -> float:
     return float(angle_between_two_vectors(residue_1.vector, residue_2.vector))
-
-class BoundedProcessPoolExecutor(ProcessPoolExecutor):
-    """
-    This class wraps a concurrent.futures.Executor to limit the size of its task queue. The default concurrent.futures.Executor is unbounded, 
-    and therefore if hundrends of thousands or millions of tasks are submited in one go, this can crash the program.
-    
-    All credits for the code go to https://github.com/mowshon/bounded_pool_executor/tree/master.
-    """
-    def __init__(self, max_workers: int, max_submited_tasks: int) -> None:
-        super().__init__(max_workers=max_workers)
-        self.semaphore = BoundedSemaphore(value=max_submited_tasks)
-
-    def submit(self, fn: Any, *args, **kwargs) -> Future[Any]: # type:ignore
-        self.semaphore.acquire()
-        future = super().submit(fn, *args, **kwargs)
-        future.add_done_callback(self.release)
-
-        return future
-    
-    def release(self, future: Future[Any]) -> None:
-        """Called once a task is done, releases one queue slot."""
-        self.semaphore.release()
-        
-        if future.exception():
-            raise future.exception() # type: ignore 

@@ -1,12 +1,11 @@
 import itertools
 from collections import defaultdict
-from concurrent.futures import Future, ProcessPoolExecutor, as_completed
-import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, Iterator, List, Set, Tuple, Union, Any
+from typing import Any, Callable, Dict, Iterator, List, Set, Tuple, Union
 
 import networkx as nx
 import pandas as pd
+from joblib import Parallel, delayed
 from tqdm import tqdm
 
 from pyscomotif.constants import (AMINO_ACID_ALPHABET,
@@ -17,7 +16,6 @@ from pyscomotif.data_containers import Residue, Residue_pair_data
 from pyscomotif.index_folders_and_files import index_folder_exists
 from pyscomotif.residue_data_dicts import extract_residue_data
 from pyscomotif.utils import (
-    BoundedProcessPoolExecutor,
     angle_between_two_vectors,
     detect_the_compression_algorithm_used_in_the_index, flatten_iterable,
     get_bin_number, get_sorted_2_tuple, pairwise_euclidean_distance,
@@ -325,8 +323,7 @@ def update_map_of_PDBs_with_all_residue_pairs(
     return
 
 def find_PDBs_with_all_residue_pairs(
-        motif_MST: nx.Graph, index_folder_path: Path, distance_delta_thr: float, angle_delta_thr: float, compression: str, 
-        concurrent_executor: ProcessPoolExecutor
+        motif_MST: nx.Graph, index_folder_path: Path, distance_delta_thr: float, angle_delta_thr: float, compression: str, parallel: Parallel
     ) -> Dict[str, List[Tuple[str,str]]]:
     """
     """
@@ -335,21 +332,16 @@ def find_PDBs_with_all_residue_pairs(
     # checked (i.e iterative intersection). A connectivity check between the already determined residue pairs and the new ones is also performed to remove PDBs 
     # that have the reside pairs but are not connected and therefore don't form a motif (see update_map_of_PDBs_with_all_residue_pairs).
     all_pairs_of_residues_to_check = get_all_pairs_of_residues_in_motif_MST(motif_MST)
-
-    submitted_futures: List[Future[Dict[str, List[Tuple[str,str]]]]] = [
-        concurrent_executor.submit(get_PDBs_that_contain_the_residue_pair, pair_of_full_residue_IDs, residue_pair_data, distance_delta_thr, angle_delta_thr, index_folder_path, compression)
+    delayed_func: Callable[[Tuple[str, str], Residue_pair_data, float, float, Path, str], Dict[str, List[Tuple[str, str]]]] = delayed(get_PDBs_that_contain_the_residue_pair)
+    results_generator: Iterator[Dict[str, List[Tuple[str,str]]]] = parallel(
+        delayed_func(pair_of_full_residue_IDs, residue_pair_data, distance_delta_thr, angle_delta_thr, index_folder_path, compression) 
         for pair_of_full_residue_IDs, residue_pair_data in all_pairs_of_residues_to_check.items()
-    ]
+    )
     
     map_of_PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]]
     map_of_PDBs_with_all_residue_pairs_initialized_flag: bool = False
     visited_nodes_map: Dict[str, Set[str]] # Used for connectivity check
-    for future in submitted_futures:
-        if future.exception():
-            raise future.exception() # type: ignore
-
-        PDBs_that_contain_the_residue_pair = future.result()
-
+    for PDBs_that_contain_the_residue_pair in results_generator:
         # Iterative intersection code. map_of_PDBs_with_all_residue_pairs must be initialized with the PDBs of a 
         # residue pair in order to be able to do the iterative intersection, otherwise we would always get an empty set 
         # given it is initially empty.
@@ -406,7 +398,7 @@ def run_subgraph_monomorphism(motif_MST: nx.Graph, pairs_of_residues: List[Tuple
     return monomorphism_checked_motifs
 
 def filter_out_PDBs_with_unconnected_residue_pairs(
-        PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]], motif_MST: nx.Graph, concurrent_executor: ProcessPoolExecutor, 
+        PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]], motif_MST: nx.Graph, parallel: Parallel, 
     ) -> Dict[str, List[nx.Graph]]:
     """
     """
@@ -420,19 +412,14 @@ def filter_out_PDBs_with_unconnected_residue_pairs(
     # the occurence of an additional AE edge between residue A32A and A35E, and that edge causes isomorphism to fail, unlike monomorphism which correctly finds the PDB.
     add_resname_as_node_attribute(motif_MST) # Needed for subgraph monomorphism, see run_subgraph_monomorphism().
 
-    submited_futures: Dict[Future[Union[None, List[nx.Graph]]], str] = {
-        concurrent_executor.submit(run_subgraph_monomorphism, motif_MST, pairs_of_residues):PDB_ID
+    delayed_func: Callable[[nx.Graph, List[Tuple[str, str]]], List[nx.Graph]] = delayed(run_subgraph_monomorphism)
+    results_generator: Iterator[List[nx.Graph]] = parallel(
+        delayed_func(motif_MST, pairs_of_residues) 
         for PDB_ID, pairs_of_residues in PDBs_with_all_residue_pairs.items()
-    }
-    PDBs_with_all_residue_pairs.clear() # Free some memory
+    )
 
     filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
-    for future in as_completed(submited_futures):
-        if future.exception():
-            raise future.exception() # type: ignore
-
-        PDB_ID = submited_futures[future]
-        monomorphism_checked_motifs = future.result()
+    for (PDB_ID, pairs_of_residues), monomorphism_checked_motifs in zip(PDBs_with_all_residue_pairs.items(), results_generator, strict=True):
         if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif 
             continue
 
@@ -496,13 +483,12 @@ def get_PDBs_with_similar_motifs(
     motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[nx.Graph]]] = {}
     n_motifs_to_solve = sum(1 for _ in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data))
 
-    #with ProcessPoolExecutor(max_workers=n_cores) as concurrent_executor:
-    with BoundedProcessPoolExecutor(max_workers=n_cores, max_submited_tasks=2*n_cores) as concurrent_executor:
+    with Parallel(n_jobs=n_cores, return_as='generator') as parallel:
         # Residue-pair level parallelisation
         if n_motifs_to_solve <= n_cores:
             for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data):
-                PDBs_with_all_residue_pairs = find_PDBs_with_all_residue_pairs(motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression, concurrent_executor)
-                filtered_PDBs_with_all_residue_pairs = filter_out_PDBs_with_unconnected_residue_pairs(PDBs_with_all_residue_pairs, motif_MST, concurrent_executor)
+                PDBs_with_all_residue_pairs = find_PDBs_with_all_residue_pairs(motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression, parallel)
+                filtered_PDBs_with_all_residue_pairs = filter_out_PDBs_with_unconnected_residue_pairs(PDBs_with_all_residue_pairs, motif_MST, parallel)
 
                 if filtered_PDBs_with_all_residue_pairs:
                     motif_MST_filtered_PDBs_map[motif_MST] = filtered_PDBs_with_all_residue_pairs
@@ -510,22 +496,20 @@ def get_PDBs_with_similar_motifs(
         # Motif level parallelisation. When having to check a large number of motifs as a result of mutated residues provided 
         # by the user, motif level parallelisation is ~35% faster than residue-pair level parallelisation.
         else:
+            all_motif_MSTs_generator = get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data)
+            delayed_func: Callable[[nx.Graph, Path, float, float, str], Dict[str, List[nx.Graph]]] = delayed(solve_motif_MST)
+            results_generator: Iterator[Dict[str, List[nx.Graph]]] = parallel(
+                delayed_func(motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression) 
+                for motif_MST in all_motif_MSTs_generator
+            )
+
+            all_motif_MSTs_generator = get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data)
             tqdm_progress_bar = get_tqdm_progress_bar(total=n_motifs_to_solve, desc='Searched motifs')
-            submitted_futures: Dict[Future[Any], nx.Graph] = {}
-            for motif_MST in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data):
-                future = concurrent_executor.submit(solve_motif_MST, motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression)
-                future.add_done_callback(lambda _:tqdm_progress_bar.update())
-
-                submitted_futures[future] = motif_MST
-            
-            for future in as_completed(submitted_futures):
-                if future.exception():
-                    raise future.exception() # type: ignore
-
-                filtered_PDBs_with_all_residue_pairs = future.result()
+            for motif_MST, filtered_PDBs_with_all_residue_pairs in zip(all_motif_MSTs_generator, results_generator, strict=True):
                 if filtered_PDBs_with_all_residue_pairs:
-                    motif_MST = submitted_futures[future]
                     motif_MST_filtered_PDBs_map[motif_MST] = filtered_PDBs_with_all_residue_pairs
+                
+                tqdm_progress_bar.update()
 
     return motif_MST_filtered_PDBs_map
 
