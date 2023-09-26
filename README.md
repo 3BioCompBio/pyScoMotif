@@ -98,8 +98,8 @@ There are two options that control the search for mutated versions of a referenc
 
 - The `--max_n_mutated_residues` option, which controls the maximum number of combinations of mutations that should be allowed when generating mutated motifs. This option can be very useful if you want to search for similar motifs carrying multiple mutations. It is set to 1 by default.
 
-Here we use PDB 1hso and residues A49, A60, A102, A175, A183, A233 and A235 as our reference motif, and take advantage of the fully_relaxed option to search for all the possible mutated versions carrying 1 mutation, so our search command would be:
+Here we use PDB 1hso and residues A46, A48, A51, A67 and A174 as our reference motif, and take advantage of the fully_relaxed option to search for all the possible mutated versions carrying 1 mutation, so our search command would be:
 
 ```
-pyscomotif motif-search --residue_type_policy=fully_relaxed --results_output_path=/home/user/Downloads/alcohol_dehydrogenase_pyScoMotif_result.csv --n_cores=6 /home/user/Downloads/UP000005640_9606_HUMAN_v3/pyScoMotif_index /home/user/Downloads/1hso.pdb A49 A60 A102 A175 A183 A233 A235
+pyscomotif motif-search --residue_type_policy=fully_relaxed --results_output_path=/home/user/Downloads/alcohol_dehydrogenase_pyScoMotif_result.csv --n_cores=6 /home/user/Downloads/UP000005640_9606_HUMAN_v3/pyScoMotif_index /home/user/Downloads/1hso.pdb A46 A48 A51 A67 A174
 ```
