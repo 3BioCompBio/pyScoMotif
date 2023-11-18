@@ -1,7 +1,7 @@
 import itertools
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Set, Tuple, Union
+from typing import Callable, Dict, Iterator, List, Set, Tuple, Union
 
 import networkx as nx
 import pandas as pd
@@ -368,9 +368,10 @@ def add_resname_as_node_attribute(graph: nx.Graph) -> None:
     nx.set_node_attributes(graph, {node:{'resname':node[-1]} for node in graph.nodes}) # Each node is a residue_full_ID so [-1] returns the residue (ex: 'G', for Glycine)
     return
 
-def run_subgraph_monomorphism(motif_MST: nx.Graph, pairs_of_residues: List[Tuple[str,str]]) -> List[nx.Graph]:
+def run_subgraph_monomorphism(motif_MST: nx.Graph, pairs_of_residues: List[Tuple[str,str]]) -> List[List[Tuple[str,str]]]:
     """
-    The returned list can be empty.
+    Returns a list of sublists of 2-tuples, where each sublist corresponds to a similar motif graph that passes the monomorphism check. The 2-tuples are pairs of
+    matched target and query residues. The returned list can be empty.
     """
     candidate_PDB_graph = nx.Graph(pairs_of_residues)
     add_resname_as_node_attribute(candidate_PDB_graph)
@@ -385,21 +386,17 @@ def run_subgraph_monomorphism(motif_MST: nx.Graph, pairs_of_residues: List[Tuple
         node_match = lambda node1,node2: node1['resname'] == node2['resname'] # Match based on residue name
     )
     
-    monomorphism_checked_motifs: List[nx.Graph] = [] # Each PDB can have multiple motifs (i.e: homodimers) -> List[nx.Graph]
+    # Each PDB can have multiple motifs (i.e: homodimers) -> List[List[Tuple[str,str]]]
+    monomorphism_checked_motifs: List[List[Tuple[str,str]]] = []
     residue_mapping_dict: Dict[str,str]
     for residue_mapping_dict in graph_matcher.subgraph_monomorphisms_iter():
-        residues_of_the_similar_motif = list(residue_mapping_dict.keys())
-        similar_motif_graph: nx.Graph = candidate_PDB_graph.subgraph(residues_of_the_similar_motif).copy()
-        
-        setattr(similar_motif_graph, 'residue_mapping_dict', residue_mapping_dict) # Used for RMSD calculation
-
-        monomorphism_checked_motifs.append(similar_motif_graph)
+        monomorphism_checked_motifs.append(list(residue_mapping_dict.items()))
 
     return monomorphism_checked_motifs
 
 def filter_out_PDBs_with_unconnected_residue_pairs(
         PDBs_with_all_residue_pairs: Dict[str, List[Tuple[str,str]]], motif_MST: nx.Graph, parallel: Parallel, 
-    ) -> Dict[str, List[nx.Graph]]:
+    ) -> Dict[str, List[List[Tuple[str,str]]]]:
     """
     """
     # To know if a PDB contains a set of connected residue pairs forming a similar motif, we use subgraph monomorphism to perform a matching between a reference 
@@ -412,14 +409,14 @@ def filter_out_PDBs_with_unconnected_residue_pairs(
     # the occurence of an additional AE edge between residue A32A and A35E, and that edge causes isomorphism to fail, unlike monomorphism which correctly finds the PDB.
     add_resname_as_node_attribute(motif_MST) # Needed for subgraph monomorphism, see run_subgraph_monomorphism().
 
-    delayed_func: Callable[[nx.Graph, List[Tuple[str, str]]], List[nx.Graph]] = delayed(run_subgraph_monomorphism)
-    results_generator: Iterator[List[nx.Graph]] = parallel(
+    delayed_func: Callable[[nx.Graph, List[Tuple[str, str]]], List[List[Tuple[str,str]]]] = delayed(run_subgraph_monomorphism)
+    results_generator: Iterator[List[List[Tuple[str,str]]]] = parallel(
         delayed_func(motif_MST, pairs_of_residues) 
         for PDB_ID, pairs_of_residues in PDBs_with_all_residue_pairs.items()
     )
 
-    filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
-    for (PDB_ID, pairs_of_residues), monomorphism_checked_motifs in zip(PDBs_with_all_residue_pairs.items(), results_generator, strict=True):
+    filtered_PDBs_with_all_residue_pairs: Dict[str, List[List[Tuple[str,str]]]] =  {}
+    for (PDB_ID, pairs_of_residues), monomorphism_checked_motifs in zip(PDBs_with_all_residue_pairs.items(), results_generator):
         if not monomorphism_checked_motifs: # These are the false positive PDBs, i.e PDBs that have all the residue pairs but where the monomorphism check doesn't find any similar motif 
             continue
 
@@ -429,7 +426,7 @@ def filter_out_PDBs_with_unconnected_residue_pairs(
 
 def solve_motif_MST(
         motif_MST: nx.Graph, index_folder_path: Path, distance_delta_thr: float, angle_delta_thr: float, compression: str, 
-    ) -> Dict[str, List[nx.Graph]]:
+    ) -> Dict[str, List[List[Tuple[str,str]]]]:
     """
     ...
     """
@@ -458,7 +455,7 @@ def solve_motif_MST(
     # Non-parallel version of filter_out_PDBs_with_unconnected_residue_pairs. Using while loop + popitem()
     # instead of a for loop to limit RAM usage.
     add_resname_as_node_attribute(motif_MST) # Needed for subgraph monomorphism, see run_subgraph_monomorphism().
-    filtered_PDBs_with_all_residue_pairs: Dict[str, List[nx.Graph]] =  {}
+    filtered_PDBs_with_all_residue_pairs: Dict[str, List[List[Tuple[str,str]]]] =  {}
     while map_of_PDBs_with_all_residue_pairs:
         PDB_ID, pairs_of_residues = map_of_PDBs_with_all_residue_pairs.popitem()
         monomorphism_checked_motifs = run_subgraph_monomorphism(motif_MST, pairs_of_residues)
@@ -476,11 +473,11 @@ def get_tqdm_progress_bar(total: int, desc: str) -> tqdm:
 def get_PDBs_with_similar_motifs(
         reference_motif_MST: nx.Graph, motif_residues_data: Dict[str, Residue], index_folder_path: Path, max_n_mutated_residues: int, 
         residue_type_policy: Union[str, Dict[str,List[str]]], distance_delta_thr: float, angle_delta_thr: float, compression: str, n_cores: int
-    ) -> Dict[nx.Graph, Dict[str, List[nx.Graph]]]:
+    ) -> Dict[nx.Graph, Dict[str, List[List[Tuple[str,str]]]]]:
     """
     ...
     """
-    motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[nx.Graph]]] = {}
+    motif_MST_filtered_PDBs_map: Dict[nx.Graph, Dict[str, List[List[Tuple[str,str]]]]] = {}
     n_motifs_to_solve = sum(1 for _ in get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data))
 
     with Parallel(n_jobs=n_cores, return_as='generator') as parallel:
@@ -497,15 +494,15 @@ def get_PDBs_with_similar_motifs(
         # by the user, motif level parallelisation is ~35% faster than residue-pair level parallelisation.
         else:
             all_motif_MSTs_generator = get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data)
-            delayed_func: Callable[[nx.Graph, Path, float, float, str], Dict[str, List[nx.Graph]]] = delayed(solve_motif_MST)
-            results_generator: Iterator[Dict[str, List[nx.Graph]]] = parallel(
+            delayed_func: Callable[[nx.Graph, Path, float, float, str], Dict[str, List[List[Tuple[str,str]]]]] = delayed(solve_motif_MST)
+            results_generator: Iterator[Dict[str, List[List[Tuple[str,str]]]]] = parallel(
                 delayed_func(motif_MST, index_folder_path, distance_delta_thr, angle_delta_thr, compression) 
                 for motif_MST in all_motif_MSTs_generator
             )
 
             all_motif_MSTs_generator = get_all_motif_MSTs_generator(reference_motif_MST, max_n_mutated_residues, residue_type_policy, motif_residues_data)
             tqdm_progress_bar = get_tqdm_progress_bar(total=n_motifs_to_solve, desc='Searched motifs')
-            for motif_MST, filtered_PDBs_with_all_residue_pairs in zip(all_motif_MSTs_generator, results_generator, strict=True):
+            for motif_MST, filtered_PDBs_with_all_residue_pairs in zip(all_motif_MSTs_generator, results_generator):
                 if filtered_PDBs_with_all_residue_pairs:
                     motif_MST_filtered_PDBs_map[motif_MST] = filtered_PDBs_with_all_residue_pairs
                 
@@ -514,9 +511,9 @@ def get_PDBs_with_similar_motifs(
     return motif_MST_filtered_PDBs_map
 
 def search_index_for_PDBs_with_similar_motifs(
-        index_folder_path: Path, PDB_file: Path, motif: Tuple[str,...], residue_type_policy: Union[str, Dict[str,List[str]]], max_n_mutated_residues: int, 
+        index_folder_path: Path, PDB_file: Path, motif: Tuple[str, ...], residue_type_policy: Union[str, Dict[str, List[str]]], max_n_mutated_residues: int, 
         distance_delta_thr: float, angle_delta_thr: float, n_cores: int
-    ) -> Tuple[nx.Graph, Dict[nx.Graph, Dict[str, List[nx.Graph]]]]:
+    ) -> Tuple[nx.Graph, Dict[nx.Graph, Dict[str, List[List[Tuple[str,str]]]]]]:
     """
     ...
     """

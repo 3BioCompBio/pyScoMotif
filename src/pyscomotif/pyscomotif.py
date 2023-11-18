@@ -45,7 +45,7 @@ def check_index_path_option(ctx: Any, param: Any, value: Union[None, Path]) -> P
 @click.option('--index_path', default=None, show_default=False, type=click.Path(file_okay=False, dir_okay=True, readable=True, writable=True, path_type=Path), 
               callback=check_index_path_option, help="Full path of the directory that will contain the index files. Defaults to <database_path>/pyScoMotif_index.")
 @click.option('--pattern', type=str, default='*.pdb', show_default=True,
-               help="File extension pattern of the PDB files in the database that the file detection algorithm should match, including compression. Examples: *.pdb, *.pdb.gz, *.ent , etcetc . Note the use of the '*' wildcard. Also note that only simple unix style patterns are accepted, complex regex patterns will fail. To know if your pattern works, test it with pathlib.Path.rglob.")
+               help="File extension pattern of the PDB files in the database that the file detection algorithm should match, including compression. Allowed patterns: *.pdb, *.pdb.gz, *.cif, *.cif.gz. Note the use of the '*' wildcard. Also note that only simple unix style patterns are accepted, complex regex patterns will fail. To know if your pattern works, test it with pathlib.Path.rglob.")
 @click.option('--compression', type=click.Choice(('bz2', 'gz')), default='bz2', show_default=True,
                help="Compression algorithm to use to compress the index files. This has nothing to do with the compression of the PDB files, for that use the '--pattern' option.")
 @click.option('--n_cores', default=1, show_default=True,

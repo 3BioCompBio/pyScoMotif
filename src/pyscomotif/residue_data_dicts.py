@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from Bio.Data.IUPACData import protein_letters_3to1_extended
 protein_letters_3to1_extended = {res_3_letters.upper():res_1_letter for res_3_letters, res_1_letter in protein_letters_3to1_extended.items()} # By default biopython 3 letter codes are cammel case (ie: 'Gly), but they are all upper case (ie: 'GLY') in parsed PDB files
-from Bio.PDB import PDBParser
+from Bio.PDB import PDBParser, MMCIFParser, MMCIF2Dict
 
 from Bio.PDB.Residue import Residue as Biopython_residue_type
 from Bio.PDB.Structure import Structure
@@ -17,22 +17,56 @@ from pyscomotif.utils import (get_PDB_ID_from_file_path,
                                 pickle_and_compress_python_object)
 
 
+def add_header_name_from_MMCIFDict(PDB_file_path: Path, parsed_PDB_file: Structure) -> None:
+    """
+    """
+    # MMCIF files from the PDB tend to result in correct header['name'], so no need to do anything in this case
+    if parsed_PDB_file.header['name'] != '':
+        return
+    
+    # MMCIF files from AlphaFold on the other hand have empty header['name']
+    if PDB_file_path.match('*.cif'):
+        mmcif_dict = MMCIF2Dict.MMCIF2Dict(PDB_file_path)
+    elif PDB_file_path.match('*.cif.gz'):
+        with gzip.open(PDB_file_path, 'rt') as decompressed_PDB_file_handle:
+            mmcif_dict = MMCIF2Dict.MMCIF2Dict(decompressed_PDB_file_handle)
+
+    if mmcif_dict.get('_struct.title'):
+        parsed_PDB_file.header['name'] = ' '.join(mmcif_dict['_struct.title'])
+    elif mmcif_dict.get('_entity.pdbx_description'):
+        parsed_PDB_file.header['name'] = ' '.join(mmcif_dict['_entity.pdbx_description'])
+
+    return
+
 def parse_PDB_with_biopython(PDB_file_path: Path) -> Structure:
     """
     """
-    parser = PDBParser(QUIET=True)
     parsed_PDB_file: Structure
-    try:    
-        if len(PDB_file_path.suffixes) == 1: # PDB file in any of the valid formats (PDB, mmCIF, etc) so Biopython should be able to parse it.
-            parsed_PDB_file = parser.get_structure(id='', file=PDB_file_path)
-        elif len(PDB_file_path.suffixes) == 2 and PDB_file_path.suffixes[-1] == '.gz':
-            with gzip.open(PDB_file_path, 'rt') as decompressed_PDB_file_handle:
-                parsed_PDB_file = parser.get_structure(id='', file=decompressed_PDB_file_handle) # The biopython PDB parser also accepts open file handles
-        else:
-            raise ValueError(f"<{PDB_file_path.suffix}> compressed PDB files are currently not supported, only gunziped (.gz) compressed PDB files are.")
+    # PDB files
+    if PDB_file_path.match('*.pdb'):
+        parser = PDBParser(QUIET=True)
+        parsed_PDB_file = parser.get_structure(id='', file=PDB_file_path)
 
-    except Exception as exception:
-        raise exception
+    elif PDB_file_path.match('*.pdb.gz'):
+        parser = PDBParser(QUIET=True)
+        with gzip.open(PDB_file_path, 'rt') as decompressed_PDB_file_handle:
+            parsed_PDB_file = parser.get_structure(id='', file=decompressed_PDB_file_handle)
+
+    # MMCIF files
+    elif PDB_file_path.match('*.cif'):
+        parser = MMCIFParser(QUIET=True)
+        parsed_PDB_file = parser.get_structure(structure_id='', filename=PDB_file_path)
+        add_header_name_from_MMCIFDict(PDB_file_path, parsed_PDB_file)
+
+    elif PDB_file_path.match('*.cif.gz'):
+        parser = MMCIFParser(QUIET=True)
+        with gzip.open(PDB_file_path, 'rt') as decompressed_PDB_file_handle:
+            parsed_PDB_file = parser.get_structure(structure_id='', filename=decompressed_PDB_file_handle)
+        add_header_name_from_MMCIFDict(PDB_file_path, parsed_PDB_file)
+
+
+    else:
+        raise ValueError(f"Problem with {PDB_file_path} file. Only PDB and MMCIF formated files (.pdb and .cif), as well as .gz compressed versions, are supported.")
     
     return parsed_PDB_file
 

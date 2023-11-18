@@ -3,11 +3,12 @@ import gzip
 import itertools
 import pickle
 from pathlib import Path
-from typing import Any, Iterable, List, Tuple, Union
+from typing import Any, Iterable, List, Tuple, Union, Dict
 
 import numba
 import numpy as np
 import numpy.typing as npt
+import networkx as nx
 
 from pyscomotif.constants import AMINO_ACID_ALPHABET
 from pyscomotif.data_containers import Residue
